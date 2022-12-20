@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"text/tabwriter"
 	"time"
@@ -40,27 +41,6 @@ type TableDiff struct {
 	SourceRowCount, DestRowCount int
 }
 
-func initializeDatabases(sourceDB, sourceConn, destDB, destConn string) (*Databases, error) {
-	srcdb, err := sqlx.Open("postgres", sourceConn)
-	if err != nil {
-		fmt.Println(err)
-		return nil, err
-	}
-	srcdb.SetMaxOpenConns(maxOpenConnection)
-
-	destdb, err := sqlx.Open("postgres", destConn)
-	if err != nil {
-		fmt.Println(err)
-		return nil, err
-	}
-	destdb.SetMaxOpenConns(maxOpenConnection)
-
-	return &Databases{
-		DB{srcdb, sourceDB},
-		DB{destdb, destDB},
-	}, nil
-}
-
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Fatal("Error loading .env file")
@@ -91,7 +71,8 @@ func main() {
 	}(databases)
 
 	ctx := context.Background()
-	limiter := make(chan bool, maxOpenConnection)
+	maxConn := int(math.Min(float64(len(tables)), float64(maxOpenConnection)))
+	limiter := make(chan bool, maxConn)
 	tableDiffStream := make(chan TableDiff, len(tables))
 	defer close(tableDiffStream)
 
@@ -101,6 +82,27 @@ func main() {
 
 	printTableDiffStream(tableDiffStream, sourceDB, destDB)
 	fmt.Println("Done")
+}
+
+func initializeDatabases(sourceDB, sourceConn, destDB, destConn string) (*Databases, error) {
+	srcdb, err := sqlx.Open("postgres", sourceConn)
+	if err != nil {
+		fmt.Println(err)
+		return nil, err
+	}
+	srcdb.SetMaxOpenConns(maxOpenConnection)
+
+	destdb, err := sqlx.Open("postgres", destConn)
+	if err != nil {
+		fmt.Println(err)
+		return nil, err
+	}
+	destdb.SetMaxOpenConns(maxOpenConnection)
+
+	return &Databases{
+		DB{srcdb, sourceDB},
+		DB{destdb, destDB},
+	}, nil
 }
 
 func printTableDiffStream(tableDiffStream chan TableDiff, sourceDB, destDB string) {
